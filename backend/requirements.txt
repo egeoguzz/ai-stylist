@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+google-generativeai
+sentence-transformers
+pinecone-client
+supabase
+python-multipart
+python-dotenv
+rembg
+pillow
+onnxruntime
