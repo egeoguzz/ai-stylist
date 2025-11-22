@@ -9,34 +9,24 @@ from PIL import Image
 from rembg import remove
 from dotenv import load_dotenv
 
-# AI Libraries
 import google.generativeai as genai
 from sentence_transformers import SentenceTransformer
 from pinecone import Pinecone
-
-# Database Library
 from supabase import create_client, Client
 
-# Load environment variables
 load_dotenv()
 
 app = FastAPI(title="AI Stylist Backend", description="RAG-based Fashion Recommendation API")
 
 # --- CONFIGURATION ---
-
-# 1. Google Gemini (Vision & Intelligence)
-# Using 'gemini-2.5-flash' for high speed and cost efficiency
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+# Using 'gemini-2.5-flash' for optimal speed/cost balance
 ai_model = genai.GenerativeModel('gemini-2.5-flash')
 
-# 2. Local Embedding Model
-# Using 'all-MiniLM-L6-v2' to generate 384-dimensional vectors locally
+# Local embedding model to generate vectors without external API calls
 embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
-# 3. Supabase Client (Relational DB & Storage)
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
-
-# 4. Pinecone Client (Vector Database)
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 index = pc.Index("clothing-index")
 
@@ -48,155 +38,113 @@ class ClothingResponse(BaseModel):
     image_url: str
     analysis: dict
 
+# Detailed item model for Frontend/iOS consumption
+class ClothingItemDetail(BaseModel):
+    id: str
+    category: str
+    color: str
+    image_url: str
+
 class RecommendationRequest(BaseModel):
-    weather: str   # e.g., "15 degrees, Rainy"
-    occasion: str  # e.g., "Coffee date"
+    weather: str
+    occasion: str
 
 class RecommendationResponse(BaseModel):
     outfit_name: str
-    selected_items: List[str]
+    selected_items: List[ClothingItemDetail] # Returning full objects instead of just IDs
     reasoning: str
 
-# --- ENDPOINT 1: UPLOAD & ANALYZE (Vision Pipeline) ---
+# --- ENDPOINTS ---
 
 @app.post("/upload-clothing", response_model=ClothingResponse)
 async def upload_clothing(file: UploadFile = File(...)):
     try:
-        # --- STEP 1: Image Processing (Background Removal) ---
+        # 1. Image Processing (Background Removal)
         image_data = await file.read()
         input_image = Image.open(io.BytesIO(image_data))
-        
-        # Remove background using Rembg to reduce visual noise
         output_image = remove(input_image)
         
-        # Convert to bytes for storage and AI processing
         buffered = io.BytesIO()
         output_image.save(buffered, format="PNG")
         final_image_bytes = buffered.getvalue()
 
-        # --- STEP 2: Storage Upload (Supabase) ---
-        # Generate unique filename
+        # 2. Upload to Supabase Storage
         file_name = f"{uuid.uuid4()}.png"
-        
-        # Upload to 'wardrobe' bucket
-        supabase.storage.from_("wardrobe").upload(
-            path=file_name,
-            file=final_image_bytes,
-            file_options={"content-type": "image/png"}
-        )
-        
-        # Get Public URL
+        supabase.storage.from_("wardrobe").upload(file_name, final_image_bytes, {"content-type": "image/png"})
         public_url_res = supabase.storage.from_("wardrobe").get_public_url(file_name)
         final_image_url = public_url_res if isinstance(public_url_res, str) else public_url_res.public_url
 
-        # --- STEP 3: AI Analysis (Vision) ---
-        prompt = """
-        Analyze this clothing item. You are a fashion stylist.
-        Return ONLY a JSON object strictly in this format: 
-        {"category": "...", "color": "...", "season": "...", "formality": "...", "description": "..."} 
-        Do not use markdown.
-        """
+        # 3. AI Analysis (Vision)
+        prompt = "Analyze this clothing. Return JSON: {'category': '...', 'color': '...', 'season': '...', 'formality': '...', 'description': '...'}"
         response = ai_model.generate_content([prompt, output_image])
-        text_response = response.text.replace("```json", "").replace("```", "").strip()
-        metadata = json.loads(text_response)
+        metadata = json.loads(response.text.replace("```json", "").replace("```", "").strip())
         
-        # --- STEP 4: Database Persistence ---
-        data_to_insert = {
-            "category": metadata["category"],
-            "color": metadata["color"],
-            "season": metadata["season"],
-            "formality": metadata["formality"],
-            "description": metadata["description"],
-            "image_url": final_image_url
-        }
+        # 4. Save to Database
+        data_to_insert = {**metadata, "image_url": final_image_url}
+        db_resp = supabase.table("clothes").insert(data_to_insert).execute()
+        clothing_id = db_resp.data[0]['id']
         
-        db_response = supabase.table("clothes").insert(data_to_insert).execute()
-        clothing_id = db_response.data[0]['id']
-        
-        # --- STEP 5: Vector Embeddings (Pinecone) ---
-        # Create semantic text representation
+        # 5. Generate Embeddings & Save to Pinecone
         text_to_embed = f"{metadata['color']} {metadata['category']} {metadata['season']} {metadata['description']}"
         vector = embedding_model.encode(text_to_embed).tolist()
         
-        # Add URL to metadata for retrieval
+        # Store image_url in metadata for retrieval during search
         metadata['image_url'] = final_image_url
+        index.upsert(vectors=[{"id": clothing_id, "values": vector, "metadata": metadata}])
         
-        # Upsert to Vector DB
-        index.upsert(vectors=[{
-            "id": clothing_id,
-            "values": vector,
-            "metadata": metadata
-        }])
-        
-        return {
-            "id": clothing_id,
-            "status": "Saved to Wardrobe successfully!",
-            "image_url": final_image_url,
-            "analysis": metadata
-        }
+        return {"id": clothing_id, "status": "Saved!", "image_url": final_image_url, "analysis": metadata}
 
     except Exception as e:
-        print(f"Error in upload: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-# --- ENDPOINT 2: RECOMMENDATION ENGINE (RAG Pipeline) ---
 
 @app.post("/recommend-outfit", response_model=RecommendationResponse)
 async def recommend_outfit(request: RecommendationRequest):
     try:
-        # --- STEP 1: Semantic Search ---
-        # Convert user query (Context) into a vector
+        # 1. Semantic Search via Pinecone
         search_query = f"{request.occasion} outfit for {request.weather} weather"
         query_vector = embedding_model.encode(search_query).tolist()
         
-        # Retrieve top 10 most relevant items from Pinecone
-        search_results = index.query(
-            vector=query_vector,
-            top_k=10,
-            include_metadata=True
-        )
+        # Retrieve top 15 relevant items
+        search_results = index.query(vector=query_vector, top_k=15, include_metadata=True)
         
-        # --- STEP 2: Construct Context for LLM ---
         wardrobe_context = ""
+        item_map = {}
+        
         for match in search_results['matches']:
             meta = match['metadata']
-            wardrobe_context += f"- ID: {match['id']}, Item: {meta.get('color')} {meta.get('category')} ({meta.get('description')})\n"
-            
-        if not wardrobe_context:
-            raise HTTPException(status_code=404, detail="Wardrobe is empty or no matching items found.")
+            item_id = match['id']
+            # Map ID to full details for response hydration
+            item_map[item_id] = {
+                "id": item_id,
+                "category": meta.get('category', 'Unknown'),
+                "color": meta.get('color', 'Unknown'),
+                "image_url": meta.get('image_url', '')
+            }
+            wardrobe_context += f"- ID: {item_id}, Item: {meta.get('color')} {meta.get('category')} ({meta.get('description')})\n"
 
-        # --- STEP 3: RAG Generation (Reasoning) ---
+        # 2. LLM Decision Making
         prompt = f"""
-        You are a professional fashion stylist.
-        
-        USER CONTEXT:
-        Occasion: {request.occasion}
-        Weather: {request.weather}
-        
-        AVAILABLE WARDROBE ITEMS (Retrieved from Vector DB):
-        {wardrobe_context}
-        
-        TASK:
-        Create the best possible outfit combination from the available items.
-        You MUST select items from the list provided.
-        
-        Return ONLY a JSON object in this format:
-        {{
-            "outfit_name": "Creative Name",
-            "selected_items": ["ID_1", "ID_2"],
-            "reasoning": "Brief explanation of why this works for the weather and occasion."
-        }}
-        Do not use markdown.
+        Act as a stylist. Context: {request.occasion}, {request.weather}
+        Wardrobe: {wardrobe_context}
+        Task: Pick ONE Top and ONE Bottom (or Dress).
+        Return JSON: {{ "outfit_name": "Name", "selected_items": ["ID_1", "ID_2"], "reasoning": "..." }}
         """
-        
         response = ai_model.generate_content(prompt)
-        clean_json = response.text.replace("```json", "").replace("```", "").strip()
-        recommendation = json.loads(clean_json)
+        recommendation = json.loads(response.text.replace("```json", "").replace("```", "").strip())
         
-        return recommendation
+        # 3. Hydrate IDs with full object details
+        full_items = []
+        for item_id in recommendation['selected_items']:
+            if item_id in item_map:
+                full_items.append(item_map[item_id])
+        
+        return {
+            "outfit_name": recommendation['outfit_name'],
+            "selected_items": full_items,
+            "reasoning": recommendation['reasoning']
+        }
 
     except Exception as e:
-        print(f"Error in recommendation: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
