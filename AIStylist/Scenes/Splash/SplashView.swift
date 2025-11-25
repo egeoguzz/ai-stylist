@@ -90,7 +90,8 @@ struct SplashView: View {
 
                 VStack(spacing: 14) {
                     Button {
-                        // TODO: Get Started
+                        let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene
+                           windowScene?.windows.first?.rootViewController = UIHostingController(rootView: HomeView())
                     } label: {
                         Text("Get Started")
                             .font(.system(size: 17, weight: .semibold))
