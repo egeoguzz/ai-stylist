@@ -1,6 +1,7 @@
 {
-  "colors" : [
+  "images" : [
     {
+      "filename" : "onboarding4.png",
       "idiom" : "universal"
     }
   ],
