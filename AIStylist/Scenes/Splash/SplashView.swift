@@ -24,9 +24,9 @@ struct SplashView: View {
             subtitle: "Let our AI stylist curate the perfect look for you based on your wardrobe, weather, and mood."
         ),
         .init(
-            title1: "Snap your",
-            title2: "wardrobe",
-            subtitle: "Take photos of your clothes and build a smart digital closet in seconds."
+            title1: "Upload photos of",
+            title2: "your entire wardrobe",
+            subtitle: "Snap or upload photos of your clothes to create your digital closet and get better outfit suggestions."
         ),
         .init(
             title1: "Save looks and plan your",
