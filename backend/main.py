@@ -6,7 +6,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 from PIL import Image
-from rembg import remove
+from rembg import remove, new_session
 from dotenv import load_dotenv
 
 import google.generativeai as genai
@@ -19,6 +19,7 @@ load_dotenv()
 app = FastAPI(title="AI Stylist Backend", description="RAG-based Fashion Recommendation API")
 
 # --- CONFIGURATION ---
+rembg_session = new_session("u2netp")
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 ai_model = genai.GenerativeModel('gemini-2.5-flash')
 embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -69,7 +70,7 @@ async def upload_clothing(file: UploadFile = File(...)):
         image_data = await file.read()
         input_image = Image.open(io.BytesIO(image_data))
         input_image.thumbnail((800, 800))
-        output_image = remove(input_image)
+        output_image = remove(input_image, session=rembg_session)
         buffered = io.BytesIO()
         output_image.save(buffered, format="PNG")
         final_image_bytes = buffered.getvalue()
