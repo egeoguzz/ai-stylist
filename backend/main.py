@@ -10,6 +10,7 @@ from rembg import remove, new_session
 from dotenv import load_dotenv
 
 import google.generativeai as genai
+from pinecone import Pinecone 
 from supabase import create_client, Client
 
 load_dotenv()
