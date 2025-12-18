@@ -10,8 +10,6 @@ from rembg import remove, new_session
 from dotenv import load_dotenv
 
 import google.generativeai as genai
-from sentence_transformers import SentenceTransformer
-from pinecone import Pinecone
 from supabase import create_client, Client
 
 load_dotenv()
@@ -22,7 +20,6 @@ app = FastAPI(title="AI Stylist Backend", description="RAG-based Fashion Recomme
 rembg_session = new_session("u2netp")
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 ai_model = genai.GenerativeModel('gemini-2.5-flash')
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 index = pc.Index("clothing-index")
@@ -62,6 +59,14 @@ class TravelResponse(BaseModel):
     outfit_combinations: List[str]
     reasoning: str
 
+def get_embedding(text: str) -> List[float]:
+    result = genai.embed_content(
+        model="models/text-embedding-004",
+        content=text,
+        task_type="retrieval_document",
+    )
+    return result['embedding']
+
 # --- ENDPOINTS ---
 
 @app.post("/upload-clothing", response_model=ClothingResponse)
@@ -89,7 +94,7 @@ async def upload_clothing(file: UploadFile = File(...)):
         clothing_id = db_resp.data[0]['id']
         
         text_to_embed = f"{metadata['color']} {metadata['category']} {metadata['season']} {metadata['description']}"
-        vector = embedding_model.encode(text_to_embed).tolist()
+        vector = get_embedding(text_to_embed)
         metadata['image_url'] = final_image_url
         index.upsert(vectors=[{"id": clothing_id, "values": vector, "metadata": metadata}])
         
@@ -101,7 +106,7 @@ async def upload_clothing(file: UploadFile = File(...)):
 async def recommend_outfit(request: RecommendationRequest):
     try:
         search_query = f"{request.occasion} outfit for {request.weather} weather"
-        query_vector = embedding_model.encode(search_query).tolist()
+        query_vector = get_embedding(search_query)
         search_results = index.query(vector=query_vector, top_k=15, include_metadata=True)
         
         wardrobe_context = ""
@@ -145,7 +150,7 @@ async def recommend_travel_pack(request: TravelRequest):
     try:
         # 1. Broad Search for the Destination
         search_query = f"Clothes suitable for {request.destination} in {request.weather}"
-        query_vector = embedding_model.encode(search_query).tolist()
+        query_vector = get_embedding(search_query)
         
         # Retrieve top 30 items to ensure variety
         search_results = index.query(vector=query_vector, top_k=30, include_metadata=True)
