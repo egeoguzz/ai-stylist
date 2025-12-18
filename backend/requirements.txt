@@ -1,12 +1,12 @@
 fastapi
 uvicorn
-google-generativeai
-sentence-transformers
-pinecone
-supabase
 python-multipart
 python-dotenv
-rembg
+google-generativeai
+pinecone
+supabase
 pillow
-onnxruntime
 numpy
+rembg[cpu]
+sentence-transformers
+torch --index-url https://download.pytorch.org/whl/cpu
