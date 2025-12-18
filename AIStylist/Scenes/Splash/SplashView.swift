@@ -8,255 +8,162 @@
 import SwiftUI
 
 struct SplashView: View {
-    @State private var iconScale: CGFloat = 0.7
-    @State private var iconOpacity: Double = 0
-    @State private var pillOpacity: Double = 0
-    @State private var titleOpacity: Double = 0
-    @State private var subtitleOpacity: Double = 0
-    @State private var buttonsOpacity: Double = 0
+    private var totalPages: Int { pages.count }
+    @State private var currentPage = 0
 
-    @State private var currentPage: Int = 0
-    @State private var pageTimer: Timer?
+    private struct OnboardingCopy {
+        let title1: String
+        let title2: String
+        let subtitle: String
+    }
 
-    private let pages: [OnboardingPage] = [
-        OnboardingPage(
-            systemImageName: "tshirt.fill",
-            pillText: "AI Outfit Detection",
-            titleLine1: "Effortless style",
-            titleLine2Prefix: "with",
-            titleLine2Highlight: "AIStylist",
-            subtitle: "Capture any piece from your wardrobe and let AIStylist create personalized outfit ideas around it."
+    private let pages: [OnboardingCopy] = [
+        .init(
+            title1: "Get daily outfit",
+            title2: "suggestions",
+            subtitle: "Let our AI stylist curate the perfect look for you based on your wardrobe, weather, and mood."
         ),
-        OnboardingPage(
-            systemImageName: "camera.viewfinder",
-            pillText: "Smart Capture",
-            titleLine1: "Snap your look",
-            titleLine2Prefix: "and get",
-            titleLine2Highlight: "instant ideas",
-            subtitle: "Use your camera to capture outfits or single items and get AI-powered suggestions in just a few seconds."
+        .init(
+            title1: "Upload photos of",
+            title2: "your entire wardrobe",
+            subtitle: "Snap or upload photos of your clothes to create your digital closet and get better outfit suggestions."
         ),
-        OnboardingPage(
-            systemImageName: "square.grid.2x2.fill",
-            pillText: "Digital Wardrobe",
-            titleLine1: "Organize your",
-            titleLine2Prefix: "entire",
-            titleLine2Highlight: "closet",
-            subtitle: "Save your favorite pieces, tag them by season, color and occasion, and build a wardrobe you can carry in your pocket."
+        .init(
+            title1: "Save looks and plan your",
+            title2: "outfits by day",
+            subtitle: "Style AI helps you organize your wardrobe. Schedule your best looks ahead of time and never wonder what to wear."
         ),
-        OnboardingPage(
-            systemImageName: "sparkles",
-            pillText: "Personal Styling",
-            titleLine1: "Style that",
-            titleLine2Prefix: "adapts to",
-            titleLine2Highlight: "you",
-            subtitle: "AIStylist learns from the looks you save and love, so every new recommendation feels more like your personal stylist."
+        .init(
+            title1: "Your style journey",
+            title2: "starts now!",
+            subtitle: "Let our friendly AI stylist help you discover outfits that make you feel your best self every day."
         )
     ]
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             LinearGradient(
                 colors: [
-                    Color.black,
-                    Color(.sRGB, white: 0.05, opacity: 1.0),
-                    Color.black
+                    Color(red: 0.95, green: 0.93, blue: 0.98),
+                    Color(red: 0.90, green: 0.88, blue: 0.96)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
             .ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                Spacer(minLength: 40)
-                TabView(selection: $currentPage) {
-                    ForEach(pages.indices, id: \.self) { index in
-                        singlePage(pages[index])
-                            .tag(index)
-                    }
-                }
-                .tabViewStyle(.page(indexDisplayMode: .never))
+            VStack {
+                VStack(spacing: 16) {
+                    
+                    HStack(spacing: 8) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(Color("aiPurple"))
 
+                        Text("STYLE AI")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.85))
+                    )
+                    .padding(.top, 34)
+                    .padding(.bottom, 40)
+
+                    TabView(selection: $currentPage) {
+                        ForEach(pages.indices, id: \.self) { index in
+                            let page = pages[index]
+
+                            VStack(spacing: 16) {
+                                Image("onboarding\(index + 1)")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 320)
+                                    .padding(.horizontal, 24)
+                                    .padding(.top, -24)
+
+                                VStack(spacing: 4) {
+                                    Text(page.title1)
+                                        .font(.system(size: 26, weight: .semibold))
+                                        .foregroundColor(Color.black.opacity(0.85))
+
+                                    Text(page.title2)
+                                        .font(.system(size: 26, weight: .semibold))
+                                        .foregroundColor(Color("aiPurple"))
+                                }
+
+                                Text(page.subtitle)
+                                    .font(.system(size: 14, weight: .regular))
+                                    .foregroundColor(Color.gray.opacity(0.9))
+                                    .multilineTextAlignment(.center)
+                                    .lineSpacing(4)
+                                    .padding(.top, 4)
+                                    .padding(.horizontal, 32)
+                            }
+                            .tag(index)
+                        }
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 460)
+
+                    HStack(spacing: 8) {
+                        ForEach(0..<totalPages, id: \.self) { index in
+                            if index == currentPage {
+                                Capsule(style: .continuous)
+                                    .fill(Color("aiPurple"))
+                                    .frame(width: 26, height: 6)
+                            } else {
+                                Circle()
+                                    .fill(Color.gray.opacity(0.35))
+                                    .frame(width: 6, height: 6)
+                            }
+                        }
+                    }
+                    .padding(.top, 6)
+                }
                 Spacer()
 
-                HStack(spacing: 8) {
-                    ForEach(pages.indices, id: \.self) { index in
-                        Circle()
-                            .fill(index == currentPage ? Color.white : Color.white.opacity(0.35))
-                            .frame(width: 6, height: 6)
-                    }
-                }
-                .padding(.top, -60)
-                .opacity(subtitleOpacity)
-
-                VStack(spacing: 14) {
+                VStack {
                     Button {
-                        let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene
-                           windowScene?.windows.first?.rootViewController = UIHostingController(rootView: HomeView())
+                        if currentPage < totalPages - 1 {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                currentPage += 1
+                            }
+                        } else {
+                            // finish action
+                        }
                     } label: {
-                        Text("Get Started")
-                            .font(.system(size: 17, weight: .semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(
-                                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [
-                                                Color(.sRGB, red: 0.98, green: 0.47, blue: 0.60, opacity: 1.0),
-                                                Color(.sRGB, red: 0.70, green: 0.40, blue: 0.95, opacity: 1.0)
-                                            ],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                    )
-                                    .shadow(color: Color.black.opacity(0.7), radius: 18, x: 0, y: 12)
-                            )
-                            .foregroundColor(.white)
+                        HStack(spacing: 10) {
+                            if currentPage == totalPages - 1 {
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 14, weight: .semibold))
+
+                                Text("Get Started")
+                                    .font(.system(size: 16, weight: .semibold))
+                            } else {
+                                Text("Continue")
+                                    .font(.system(size: 16, weight: .semibold))
+
+                                Image(systemName: "arrow.right")
+                            }
+                        }
                     }
-                }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 36)
-                .opacity(buttonsOpacity)
-            }
-        }
-        .onAppear {
-            startAnimation()
-            startAutoPageChange()
-        }
-        .onDisappear {
-            pageTimer?.invalidate()
-        }
-    }
-
-    private func singlePage(_ page: OnboardingPage) -> some View {
-        VStack(spacing: 0) {
-            ZStack {
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [
-                                Color.purple.opacity(0.5),
-                                Color.clear
-                            ],
-                            center: .center,
-                            startRadius: 0,
-                            endRadius: 220
-                        )
-                    )
-                    .frame(width: 260, height: 260)
-                    .opacity(iconOpacity)
-
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(.sRGB, red: 0.98, green: 0.47, blue: 0.60, opacity: 1.0),
-                                Color(.sRGB, red: 0.70, green: 0.40, blue: 0.95, opacity: 1.0)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .overlay(
-                        Circle()
-                            .stroke(Color.white.opacity(0.3), lineWidth: 1.4)
-                    )
-                    .shadow(color: Color.purple.opacity(0.6), radius: 26, x: 0, y: 18)
-                    .frame(width: 160, height: 160)
-
-                Image(systemName: page.systemImageName)
-                    .font(.system(size: 56, weight: .semibold))
                     .foregroundColor(.white)
-            }
-            .scaleEffect(iconScale)
-            .opacity(iconOpacity)
-            .padding(.top, -90)
-
-            Text(page.pillText)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.white)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 8)
-                .background(
-                    Capsule()
-                        .fill(Color.white.opacity(0.08))
-                        .overlay(
-                            Capsule()
-                                .stroke(Color.white.opacity(0.25), lineWidth: 1)
-                        )
-                )
-                .padding(.top, 24)
-                .opacity(pillOpacity)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(page.titleLine1)
-                    .font(.system(size: 34, weight: .semibold))
-                    .foregroundColor(.white)
-
-                HStack(spacing: 4) {
-                    Text(page.titleLine2Prefix)
-                        .font(.system(size: 34, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.85))
-
-                    Text(page.titleLine2Highlight)
-                        .font(.system(size: 34, weight: .bold))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [
-                                    Color(.sRGB, red: 0.98, green: 0.47, blue: 0.60, opacity: 1.0),
-                                    Color(.sRGB, red: 0.70, green: 0.40, blue: 0.95, opacity: 1.0)
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(
+                        Capsule()
+                            .fill(Color("aiPurple"))
+                    )
+                    .padding(.horizontal, 32)
+                    .padding(.bottom, 40)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 32)
-            .padding(.top, 54)
-            .opacity(titleOpacity)
-
-            Text(page.subtitle)
-                .font(.system(size: 15))
-                .foregroundColor(.white.opacity(0.7))
-                .lineSpacing(4)
-                .padding(.top, 16)
-                .padding(.horizontal, 32)
-                .multilineTextAlignment(.leading)
-                .opacity(subtitleOpacity)
-        }
-    }
-
-    private func startAnimation() {
-        withAnimation(.spring(response: 0.9, dampingFraction: 0.75)) {
-            iconOpacity = 1
-            iconScale = 1.0
-        }
-
-        withAnimation(.easeOut(duration: 0.5).delay(0.25)) {
-            pillOpacity = 1
-        }
-
-        withAnimation(.easeOut(duration: 0.6).delay(0.3)) {
-            titleOpacity = 1
-        }
-
-        withAnimation(.easeOut(duration: 0.6).delay(0.45)) {
-            subtitleOpacity = 1
-        }
-
-        withAnimation(.spring(response: 0.9, dampingFraction: 0.8).delay(0.7)) {
-            buttonsOpacity = 1
-        }
-    }
-
-    private func startAutoPageChange() {
-        pageTimer?.invalidate()
-        pageTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
-            withAnimation(.easeInOut(duration: 0.4)) {
-                currentPage = (currentPage + 1) % pages.count
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
     }
 }
