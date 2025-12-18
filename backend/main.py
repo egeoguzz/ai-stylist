@@ -68,6 +68,7 @@ async def upload_clothing(file: UploadFile = File(...)):
     try:
         image_data = await file.read()
         input_image = Image.open(io.BytesIO(image_data))
+        input_image.thumbnail((800, 800))
         output_image = remove(input_image)
         buffered = io.BytesIO()
         output_image.save(buffered, format="PNG")
