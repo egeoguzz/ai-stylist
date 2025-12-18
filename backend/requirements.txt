@@ -2,10 +2,11 @@ fastapi
 uvicorn
 google-generativeai
 sentence-transformers
-pinecone-client
+pinecone
 supabase
 python-multipart
 python-dotenv
 rembg
 pillow
 onnxruntime
+numpy
