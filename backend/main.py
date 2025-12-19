@@ -103,6 +103,22 @@ async def upload_clothing(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/wardrobe", response_model=List[ClothingItemDetail])
+async def get_wardrobe(category: Optional[str] = Query(None, description="Filter by category (e.g. 'Shoes')")):
+    try:
+        # Supabase'den veriyi çek
+        query = supabase.table("clothes").select("*").order("created_at", desc=True)
+        
+        # Eğer kategori filtresi varsa uygula
+        if category:
+            query = query.ilike("category", f"%{category}%") # ilike = case insensitive search
+            
+        response = query.execute()
+        
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/recommend-outfit", response_model=RecommendationResponse)
 async def recommend_outfit(request: RecommendationRequest):
     try:
