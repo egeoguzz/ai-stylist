@@ -2,7 +2,7 @@ import os
 import io
 import json
 import uuid
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from pydantic import BaseModel
 from typing import List, Optional
 from PIL import Image
