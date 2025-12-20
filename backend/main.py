@@ -27,6 +27,15 @@ index = pc.Index("clothing-index")
 
 # --- DATA MODELS ---
 
+class ClothingItemDetail(BaseModel):
+    id: str
+    category: str
+    color: str
+    image_url: str
+    season: Optional[str] = None
+    formality: Optional[str] = None
+    description: Optional[str] = None
+
 class ClothingResponse(BaseModel):
     id: str
     status: str
@@ -106,12 +115,10 @@ async def upload_clothing(file: UploadFile = File(...)):
 @app.get("/wardrobe", response_model=List[ClothingItemDetail])
 async def get_wardrobe(category: Optional[str] = Query(None, description="Filter by category (e.g. 'Shoes')")):
     try:
-        # Supabase'den veriyi çek
         query = supabase.table("clothes").select("*").order("created_at", desc=True)
         
-        # Eğer kategori filtresi varsa uygula
         if category:
-            query = query.ilike("category", f"%{category}%") # ilike = case insensitive search
+            query = query.ilike("category", f"%{category}%") 
             
         response = query.execute()
         
