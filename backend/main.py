@@ -126,6 +126,16 @@ async def get_wardrobe(category: Optional[str] = Query(None, description="Filter
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.delete("/wardrobe/{item_id}")
+async def delete_item(item_id: str):
+    try:
+        supabase.table("clothes").delete().eq("id", item_id).execute()
+        index.delete(ids=[item_id])
+        
+        return {"status": "success", "message": "Item deleted from wardrobe and AI memory."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/recommend-outfit", response_model=RecommendationResponse)
 async def recommend_outfit(request: RecommendationRequest):
     try:
