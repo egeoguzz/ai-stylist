@@ -2,18 +2,55 @@ import os
 import io
 import json
 import uuid
+import random
+import google.generativeai as genai
+
+from datetime import date
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from pydantic import BaseModel
 from typing import List, Optional
 from PIL import Image
 from rembg import remove, new_session
 from dotenv import load_dotenv
-
-import google.generativeai as genai
 from pinecone import Pinecone 
 from supabase import create_client, Client
 
 load_dotenv()
+
+# --- STATIC DATA ---
+
+STYLING_TIPS = [
+    "Accessories are the easiest way to upgrade a simple outfit.",
+    "Invest in high-quality basics; they never go out of style.",
+    "If you're wearing loose bottoms, try a tighter top for balance.",
+    "Don't be afraid to mix textures like leather and wool.",
+    "A monochrome outfit always looks chic and expensive.",
+    "Shoes can make or break an outfit; choose wisely.",
+    "Tailoring is key: even cheap clothes look expensive if they fit perfectly.",
+    "When in doubt, wear a white shirt and blue jeans.",
+    "Add a belt to define your waist and structure your look.",
+    "Darker colors are generally more slimming and formal.",
+    "Vertical stripes elongate your figure.",
+    "Cuff your jeans or sleeves to show a little skin.",
+    "Invest in a classic trench coat for transitional weather.",
+    "Layering adds depth and interest to any look.",
+    "Gold jewelry warms up skin tones; silver cools them down.",
+    "A blazer instantly elevates a casual t-shirt and jeans.",
+    "Don't follow every trend; stick to what suits your body type.",
+    "Confidence is the best accessory you can wear.",
+    "Match your belt color to your shoe color for a cohesive look.",
+    "Navy blue is a softer, more versatile alternative to black.",
+    "Use a scarf to add a pop of color to a neutral outfit.",
+    "Make sure your clothes are ironed; wrinkles ruin the aesthetic.",
+    "Know your measurements when shopping online.",
+    "A statement bag can turn a boring outfit into a look.",
+    "Proportion is everything: rule of thirds works in fashion too.",
+    "Animal prints act as neutrals when styled correctly.",
+    "Sunglasses add an instant cool factor.",
+    "Tuck in your shirt to lengthen your legs.",
+    "Wear nude shoes to elongate your legs.",
+    "Dress for the occasion, but always be yourself."
+]
 
 app = FastAPI(title="AI Stylist Backend", description="RAG-based Fashion Recommendation API")
 
@@ -76,6 +113,16 @@ def get_embedding(text: str) -> List[float]:
         task_type="retrieval_document",
     )
     return result['embedding']
+
+class DailyTipResponse(BaseModel):
+    date: str
+    tip: str
+
+class DefaultSuggestionItem(BaseModel):
+    type: str 
+    title: str
+    description: str
+    image_url: Optional[str] = "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=800&q=80"
 
 # --- ENDPOINTS ---
 
@@ -237,6 +284,34 @@ async def recommend_travel_pack(request: TravelRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/daily-tip", response_model=DailyTipResponse)
+async def get_daily_tip():
+    today = date.today()
+    random.seed(today.toordinal())
+    selected_tip = random.choice(STYLING_TIPS)
+    
+    return {
+        "date": today.isoformat(),
+        "tip": selected_tip
+    }
+
+@app.get("/default-suggestions", response_model=List[DefaultSuggestionItem])
+async def get_default_suggestions():
+    return [
+        {
+            "type": "casual",
+            "title": "Effortless Weekend",
+            "description": "Pair your favorite blue jeans with a white tee and white sneakers. Throw on a beige trench coat for a chic finish.",
+            "image_url": "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=800"
+        },
+        {
+            "type": "work",
+            "title": "Modern Professional",
+            "description": "A sharp navy blazer over a light grey turtleneck. Match with tailored black trousers and leather loafers.",
+            "image_url": "https://images.unsplash.com/photo-1487222477894-8943e31ef7b2?w=800"
+        }
+    ]
 
 if __name__ == "__main__":
     import uvicorn
