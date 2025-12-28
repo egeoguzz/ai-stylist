@@ -3,76 +3,74 @@ import io
 import json
 import uuid
 import random
-import google.generativeai as genai
-
 from datetime import date
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import List, Optional
 from PIL import Image
 from rembg import remove, new_session
 from dotenv import load_dotenv
-from pinecone import Pinecone 
+
+import google.generativeai as genai
+from pinecone import Pinecone
 from supabase import create_client, Client
 
 load_dotenv()
 
-# --- STATIC DATA ---
-
-STYLING_TIPS = [
-    "Accessories are the easiest way to upgrade a simple outfit.",
-    "Invest in high-quality basics; they never go out of style.",
-    "If you're wearing loose bottoms, try a tighter top for balance.",
-    "Don't be afraid to mix textures like leather and wool.",
-    "A monochrome outfit always looks chic and expensive.",
-    "Shoes can make or break an outfit; choose wisely.",
-    "Tailoring is key: even cheap clothes look expensive if they fit perfectly.",
-    "When in doubt, wear a white shirt and blue jeans.",
-    "Add a belt to define your waist and structure your look.",
-    "Darker colors are generally more slimming and formal.",
-    "Vertical stripes elongate your figure.",
-    "Cuff your jeans or sleeves to show a little skin.",
-    "Invest in a classic trench coat for transitional weather.",
-    "Layering adds depth and interest to any look.",
-    "Gold jewelry warms up skin tones; silver cools them down.",
-    "A blazer instantly elevates a casual t-shirt and jeans.",
-    "Don't follow every trend; stick to what suits your body type.",
-    "Confidence is the best accessory you can wear.",
-    "Match your belt color to your shoe color for a cohesive look.",
-    "Navy blue is a softer, more versatile alternative to black.",
-    "Use a scarf to add a pop of color to a neutral outfit.",
-    "Make sure your clothes are ironed; wrinkles ruin the aesthetic.",
-    "Know your measurements when shopping online.",
-    "A statement bag can turn a boring outfit into a look.",
-    "Proportion is everything: rule of thirds works in fashion too.",
-    "Animal prints act as neutrals when styled correctly.",
-    "Sunglasses add an instant cool factor.",
-    "Tuck in your shirt to lengthen your legs.",
-    "Wear nude shoes to elongate your legs.",
-    "Dress for the occasion, but always be yourself."
-]
-
 app = FastAPI(title="AI Stylist Backend", description="RAG-based Fashion Recommendation API")
 
-# --- CONFIGURATION ---
-rembg_session = new_session("u2netp")
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-ai_model = genai.GenerativeModel('gemini-2.5-flash')
-supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
-pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-index = pc.Index("clothing-index")
+# --- SECURITY SETUP ---
+security = HTTPBearer()
+
+# --- LAZY LOADING GLOBALS ---
+rembg_session = None
+ai_model = None
+index = None
+supabase = None
+
+# --- INITIALIZATION FUNCTIONS ---
+def get_rembg_session():
+    global rembg_session
+    if rembg_session is None:
+        rembg_session = new_session("u2netp") # Lite Model (4MB)
+    return rembg_session
+
+def get_ai_model():
+    global ai_model
+    if ai_model is None:
+        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+        ai_model = genai.GenerativeModel('gemini-2.5-flash')
+    return ai_model
+
+def get_index():
+    global index
+    if index is None:
+        pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+        index = pc.Index("clothing-index")
+    return index
+
+def get_supabase():
+    global supabase
+    if supabase is None:
+        supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+    return supabase
+
+# --- AUTHENTICATION HELPER (Kritik Kısım) ---
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    sb = get_supabase()
+    
+    try:
+        user_response = sb.auth.get_user(token)
+        if not user_response or not user_response.user:
+            raise HTTPException(status_code=401, detail="Invalid Authentication Token")
+        return user_response.user.id
+    except Exception as e:
+        print(f"Auth Error: {e}")
+        raise HTTPException(status_code=401, detail="Invalid or Expired Token")
 
 # --- DATA MODELS ---
-
-class ClothingItemDetail(BaseModel):
-    id: str
-    category: str
-    color: str
-    image_url: str
-    season: Optional[str] = None
-    formality: Optional[str] = None
-    description: Optional[str] = None
-
 class ClothingResponse(BaseModel):
     id: str
     status: str
@@ -84,6 +82,9 @@ class ClothingItemDetail(BaseModel):
     category: str
     color: str
     image_url: str
+    season: Optional[str] = None
+    formality: Optional[str] = None
+    description: Optional[str] = None
 
 class RecommendationRequest(BaseModel):
     weather: str
@@ -94,7 +95,6 @@ class RecommendationResponse(BaseModel):
     selected_items: List[ClothingItemDetail]
     reasoning: str
 
-# New Models for Travel Feature
 class TravelRequest(BaseModel):
     destination: str
     days: int
@@ -106,89 +106,146 @@ class TravelResponse(BaseModel):
     outfit_combinations: List[str]
     reasoning: str
 
-def get_embedding(text: str) -> List[float]:
-    result = genai.embed_content(
-        model="models/text-embedding-004",
-        content=text,
-        task_type="retrieval_document",
-    )
-    return result['embedding']
-
 class DailyTipResponse(BaseModel):
     date: str
     tip: str
 
 class DefaultSuggestionItem(BaseModel):
-    type: str 
+    type: str
     title: str
     description: str
-    image_url: Optional[str] = "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=800&q=80"
+    image_url: str
+
+# --- STATIC DATA ---
+STYLING_TIPS = [
+    "Accessories are the easiest way to upgrade a simple outfit.",
+    "Invest in high-quality basics; they never go out of style.",
+    "If you're wearing loose bottoms, try a tighter top for balance.",
+    "A monochrome outfit always looks chic and expensive.",
+    "When in doubt, wear a white shirt and blue jeans.",
+    "Darker colors are generally more slimming and formal.",
+    "Layering adds depth and interest to any look.",
+    "Gold jewelry warms up skin tones; silver cools them down.",
+    "Don't follow every trend; stick to what suits your body type.",
+    "Match your belt color to your shoe color for a cohesive look."
+]
+
+# --- HELPER: EMBEDDING ---
+def get_embedding(text: str) -> List[float]:
+    try:
+        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+        result = genai.embed_content(
+            model="models/text-embedding-004",
+            content=text,
+            task_type="retrieval_document",
+        )
+        return result['embedding']
+    except Exception as e:
+        print(f"Embedding Error: {e}")
+        raise HTTPException(status_code=500, detail="Vector embedding failed")
 
 # --- ENDPOINTS ---
 
+# 1. UPLOAD 
 @app.post("/upload-clothing", response_model=ClothingResponse)
-async def upload_clothing(file: UploadFile = File(...)):
+async def upload_clothing(
+    file: UploadFile = File(...), 
+    user_id: str = Depends(get_current_user)
+):
     try:
         image_data = await file.read()
         input_image = Image.open(io.BytesIO(image_data))
         input_image.thumbnail((800, 800))
-        output_image = remove(input_image, session=rembg_session)
+        
+        session = get_rembg_session()
+        output_image = remove(input_image, session=session)
+        
         buffered = io.BytesIO()
         output_image.save(buffered, format="PNG")
         final_image_bytes = buffered.getvalue()
 
         file_name = f"{uuid.uuid4()}.png"
-        supabase.storage.from_("wardrobe").upload(file_name, final_image_bytes, {"content-type": "image/png"})
-        public_url_res = supabase.storage.from_("wardrobe").get_public_url(file_name)
+        sb = get_supabase()
+        path = f"{user_id}/{file_name}"
+        
+        sb.storage.from_("wardrobe").upload(path, final_image_bytes, {"content-type": "image/png"})
+        public_url_res = sb.storage.from_("wardrobe").get_public_url(path)
         final_image_url = public_url_res if isinstance(public_url_res, str) else public_url_res.public_url
 
         prompt = "Analyze this clothing. Return JSON: {'category': '...', 'color': '...', 'season': '...', 'formality': '...', 'description': '...'}"
-        response = ai_model.generate_content([prompt, output_image])
+        model = get_ai_model()
+        response = model.generate_content([prompt, output_image])
         metadata = json.loads(response.text.replace("```json", "").replace("```", "").strip())
         
-        data_to_insert = {**metadata, "image_url": final_image_url}
-        db_resp = supabase.table("clothes").insert(data_to_insert).execute()
+        data_to_insert = {**metadata, "image_url": final_image_url, "user_id": user_id}
+        db_resp = sb.table("clothes").insert(data_to_insert).execute()
         clothing_id = db_resp.data[0]['id']
         
         text_to_embed = f"{metadata['color']} {metadata['category']} {metadata['season']} {metadata['description']}"
         vector = get_embedding(text_to_embed)
+        
         metadata['image_url'] = final_image_url
-        index.upsert(vectors=[{"id": clothing_id, "values": vector, "metadata": metadata}])
+        metadata['user_id'] = user_id
+        
+        idx = get_index()
+        idx.upsert(vectors=[{"id": clothing_id, "values": vector, "metadata": metadata}])
         
         return {"id": clothing_id, "status": "Saved!", "image_url": final_image_url, "analysis": metadata}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# 2. LIST WARDROBE 
 @app.get("/wardrobe", response_model=List[ClothingItemDetail])
-async def get_wardrobe(category: Optional[str] = Query(None, description="Filter by category (e.g. 'Shoes')")):
+async def get_wardrobe(
+    category: Optional[str] = Query(None),
+    user_id: str = Depends(get_current_user)
+):
     try:
-        query = supabase.table("clothes").select("*").order("created_at", desc=True)
+        sb = get_supabase()
+        query = sb.table("clothes").select("*").eq("user_id", user_id).order("created_at", desc=True)
         
         if category:
-            query = query.ilike("category", f"%{category}%") 
+            query = query.ilike("category", f"%{category}%")
             
         response = query.execute()
-        
         return response.data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# 3. DELETE ITEM 
 @app.delete("/wardrobe/{item_id}")
-async def delete_item(item_id: str):
+async def delete_item(
+    item_id: str,
+    user_id: str = Depends(get_current_user)
+):
     try:
-        supabase.table("clothes").delete().eq("id", item_id).execute()
-        index.delete(ids=[item_id])
+        sb = get_supabase()
+        sb.table("clothes").delete().eq("id", item_id).eq("user_id", user_id).execute()
         
-        return {"status": "success", "message": "Item deleted from wardrobe and AI memory."}
+        idx = get_index()
+        idx.delete(ids=[item_id])
+        
+        return {"status": "success", "message": "Item deleted."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# 4. RECOMMEND
 @app.post("/recommend-outfit", response_model=RecommendationResponse)
-async def recommend_outfit(request: RecommendationRequest):
+async def recommend_outfit(
+    request: RecommendationRequest,
+    user_id: str = Depends(get_current_user)
+):
     try:
         search_query = f"{request.occasion} outfit for {request.weather} weather"
         query_vector = get_embedding(search_query)
-        search_results = index.query(vector=query_vector, top_k=15, include_metadata=True)
+        
+        idx = get_index()
+        search_results = idx.query(
+            vector=query_vector, 
+            top_k=15, 
+            include_metadata=True,
+            filter={"user_id": user_id}
+        )
         
         wardrobe_context = ""
         item_map = {}
@@ -197,11 +254,18 @@ async def recommend_outfit(request: RecommendationRequest):
             item_id = match['id']
             item_map[item_id] = {
                 "id": item_id,
-                "category": meta.get('category', 'Unknown'),
-                "color": meta.get('color', 'Unknown'),
-                "image_url": meta.get('image_url', '')
+                "category": meta.get('category'),
+                "color": meta.get('color'),
+                "image_url": meta.get('image_url')
             }
-            wardrobe_context += f"- ID: {item_id}, Item: {meta.get('color')} {meta.get('category')} ({meta.get('description')})\n"
+            wardrobe_context += f"- ID: {item_id}, Item: {meta.get('color')} {meta.get('category')}\n"
+
+        if not wardrobe_context:
+             return {
+                 "outfit_name": "Wardrobe Empty",
+                 "selected_items": [],
+                 "reasoning": "You need to upload clothes first!"
+             }
 
         prompt = f"""
         Act as a stylist. Context: {request.occasion}, {request.weather}
@@ -209,32 +273,41 @@ async def recommend_outfit(request: RecommendationRequest):
         Task: Pick ONE Top and ONE Bottom (or Dress).
         Return JSON: {{ "outfit_name": "Name", "selected_items": ["ID_1", "ID_2"], "reasoning": "..." }}
         """
-        response = ai_model.generate_content(prompt)
+        model = get_ai_model()
+        response = model.generate_content(prompt)
         recommendation = json.loads(response.text.replace("```json", "").replace("```", "").strip())
         
         full_items = []
-        for item_id in recommendation['selected_items']:
+        for item_id in recommendation.get('selected_items', []):
             if item_id in item_map:
                 full_items.append(item_map[item_id])
         
         return {
-            "outfit_name": recommendation['outfit_name'],
+            "outfit_name": recommendation.get('outfit_name', 'Outfit'),
             "selected_items": full_items,
-            "reasoning": recommendation['reasoning']
+            "reasoning": recommendation.get('reasoning', '')
         }
     except Exception as e:
+        print(f"Rec Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- NEW ENDPOINT: TRAVEL CAPSULE GENERATOR (Premium) ---
+# 5. TRAVEL
 @app.post("/recommend-travel-pack", response_model=TravelResponse)
-async def recommend_travel_pack(request: TravelRequest):
+async def recommend_travel_pack(
+    request: TravelRequest,
+    user_id: str = Depends(get_current_user)
+):
     try:
-        # 1. Broad Search for the Destination
         search_query = f"Clothes suitable for {request.destination} in {request.weather}"
         query_vector = get_embedding(search_query)
         
-        # Retrieve top 30 items to ensure variety
-        search_results = index.query(vector=query_vector, top_k=30, include_metadata=True)
+        idx = get_index()
+        search_results = idx.query(
+            vector=query_vector, 
+            top_k=30, 
+            include_metadata=True,
+            filter={"user_id": user_id}
+        )
         
         item_map = {}
         wardrobe_context = ""
@@ -249,66 +322,60 @@ async def recommend_travel_pack(request: TravelRequest):
             }
             wardrobe_context += f"- ID: {item_id}, {meta.get('color')} {meta.get('category')}\n"
 
-        # 2. Generate Capsule Wardrobe
+        if not wardrobe_context:
+             return {
+                 "pack_name": "Empty Wardrobe",
+                 "items_to_pack": [],
+                 "outfit_combinations": [],
+                 "reasoning": "Upload clothes to use this feature."
+             }
+
         prompt = f"""
-        You are a Travel Stylist.
-        Trip: {request.days} days to {request.destination}. Weather: {request.weather}.
+        You are a Travel Stylist. Trip: {request.days} days to {request.destination}. Weather: {request.weather}.
         Available Items: {wardrobe_context}
-        
         Task: Create a 'Capsule Wardrobe'.
-        1. Select versatile items (Limit: {request.days + 2} items total).
-        2. Create {request.days} different outfit combinations using ONLY these items (Mix & Match).
-        
-        Return JSON:
-        {{
-            "pack_name": "Creative Name",
-            "items_to_pack": ["ID_1", ...],
-            "outfit_combinations": ["Day 1: ID_1 + ID_3", ...],
-            "reasoning": "..."
-        }}
+        Return JSON: {{ "pack_name": "Name", "items_to_pack": ["ID_1", ...], "outfit_combinations": ["..."], "reasoning": "..." }}
         """
-        response = ai_model.generate_content(prompt)
+        model = get_ai_model()
+        response = model.generate_content(prompt)
         ai_result = json.loads(response.text.replace("```json", "").replace("```", "").strip())
         
-        # Hydrate items
         packed_items_details = []
-        for item_id in ai_result['items_to_pack']:
+        for item_id in ai_result.get('items_to_pack', []):
             if item_id in item_map:
                 packed_items_details.append(item_map[item_id])
 
         return {
-            "pack_name": ai_result['pack_name'],
+            "pack_name": ai_result.get('pack_name', 'Trip Pack'),
             "items_to_pack": packed_items_details,
-            "outfit_combinations": ai_result['outfit_combinations'],
-            "reasoning": ai_result['reasoning']
+            "outfit_combinations": ai_result.get('outfit_combinations', []),
+            "reasoning": ai_result.get('reasoning', '')
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# 6. DAILY TIP (No login - Public)
 @app.get("/daily-tip", response_model=DailyTipResponse)
 async def get_daily_tip():
     today = date.today()
     random.seed(today.toordinal())
     selected_tip = random.choice(STYLING_TIPS)
-    
-    return {
-        "date": today.isoformat(),
-        "tip": selected_tip
-    }
+    return {"date": today.isoformat(), "tip": selected_tip}
 
+# 7. DEFAULT SUGGESTIONS (No login - Public)
 @app.get("/default-suggestions", response_model=List[DefaultSuggestionItem])
 async def get_default_suggestions():
     return [
         {
             "type": "casual",
             "title": "Effortless Weekend",
-            "description": "Pair your favorite blue jeans with a white tee and white sneakers. Throw on a beige trench coat for a chic finish.",
+            "description": "Pair your favorite blue jeans with a white tee and white sneakers.",
             "image_url": "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=800"
         },
         {
             "type": "work",
             "title": "Modern Professional",
-            "description": "A sharp navy blazer over a light grey turtleneck. Match with tailored black trousers and leather loafers.",
+            "description": "A sharp navy blazer over a light grey turtleneck.",
             "image_url": "https://images.unsplash.com/photo-1487222477894-8943e31ef7b2?w=800"
         }
     ]
