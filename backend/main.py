@@ -3,6 +3,7 @@ import io
 import json
 import uuid
 import random
+import httpx
 from datetime import date
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -56,19 +57,33 @@ def get_supabase():
         supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
     return supabase
 
-# --- AUTHENTICATION HELPER (Kritik Kısım) ---
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
-    sb = get_supabase()
-    
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_KEY")
+
+    auth_url = f"{supabase_url}/auth/v1/user"
+
     try:
-        user_response = sb.auth.get_user(token)
-        if not user_response or not user_response.user:
-            raise HTTPException(status_code=401, detail="Invalid Authentication Token")
-        return user_response.user.id
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                auth_url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "apikey": supabase_key
+                }
+            )
+            
+            if response.status_code == 200:
+                user_data = response.json()
+                return user_data['id']
+            else:
+                print(f"Auth Failed: {response.text}")
+                raise HTTPException(status_code=401, detail="Invalid Authentication Token")
+
     except Exception as e:
-        print(f"Auth Error: {e}")
-        raise HTTPException(status_code=401, detail="Invalid or Expired Token")
+        print(f"Auth System Error: {e}")
+        raise HTTPException(status_code=401, detail="Authentication Service Unavailable")
 
 # --- DATA MODELS ---
 class ClothingResponse(BaseModel):
