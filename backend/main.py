@@ -10,12 +10,14 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import List, Optional
 from PIL import Image
-from rembg import remove, new_session
 from dotenv import load_dotenv
 
 import google.generativeai as genai
 from pinecone import Pinecone
 from supabase import create_client, Client
+
+# Import the celery task
+from worker import process_clothing_image
 
 load_dotenv()
 
@@ -24,19 +26,13 @@ app = FastAPI(title="AI Stylist Backend", description="RAG-based Fashion Recomme
 # --- SECURITY SETUP ---
 security = HTTPBearer()
 
-# --- LAZY LOADING GLOBALS ---
-rembg_session = None
+# --- GLOBALS ---
+# Note: rembg_session is removed from here as it's now in worker.py
 ai_model = None
 index = None
 supabase = None
 
 # --- INITIALIZATION FUNCTIONS ---
-def get_rembg_session():
-    global rembg_session
-    if rembg_session is None:
-        rembg_session = new_session("u2netp") # Lite Model (4MB)
-    return rembg_session
-
 def get_ai_model():
     global ai_model
     if ai_model is None:
@@ -86,20 +82,22 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         raise HTTPException(status_code=401, detail="Authentication Service Unavailable")
 
 # --- DATA MODELS ---
+# (Keep all your existing data models here exactly as they were)
 class ClothingResponse(BaseModel):
     id: str
     status: str
     image_url: str
     analysis: dict
-
+    
 class ClothingItemDetail(BaseModel):
     id: str
-    category: str
-    color: str
+    category: Optional[str] = None
+    color: Optional[str] = None
     image_url: str
     season: Optional[str] = None
     formality: Optional[str] = None
     description: Optional[str] = None
+    status: Optional[str] = None # Added status field
 
 class RecommendationRequest(BaseModel):
     weather: str
@@ -161,7 +159,7 @@ def get_embedding(text: str) -> List[float]:
 
 # --- ENDPOINTS ---
 
-# 1. UPLOAD 
+# 1. UPLOAD (UPDATED FOR ASYNC WORKER)
 @app.post("/upload-clothing", response_model=ClothingResponse)
 async def upload_clothing(
     file: UploadFile = File(...), 
@@ -169,47 +167,42 @@ async def upload_clothing(
 ):
     try:
         image_data = await file.read()
-        input_image = Image.open(io.BytesIO(image_data))
-        input_image.thumbnail((800, 800))
-        
-        session = get_rembg_session()
-        output_image = remove(input_image, session=session)
-        
-        buffered = io.BytesIO()
-        output_image.save(buffered, format="PNG")
-        final_image_bytes = buffered.getvalue()
-
         file_name = f"{uuid.uuid4()}.png"
+        
         sb = get_supabase()
         path = f"{user_id}/{file_name}"
         
-        sb.storage.from_("wardrobe").upload(path, final_image_bytes, {"content-type": "image/png"})
-        public_url_res = sb.storage.from_("wardrobe").get_public_url(path)
-        final_image_url = public_url_res if isinstance(public_url_res, str) else public_url_res.public_url
-
-        prompt = "Analyze this clothing. Return JSON: {'category': '...', 'color': '...', 'season': '...', 'formality': '...', 'description': '...'}"
-        model = get_ai_model()
-        response = model.generate_content([prompt, output_image])
-        metadata = json.loads(response.text.replace("```json", "").replace("```", "").strip())
+        # 1. Upload raw image directly to storage
+        sb.storage.from_("wardrobe").upload(path, image_data, {"content-type": "image/png"})
         
-        data_to_insert = {**metadata, "image_url": final_image_url, "user_id": user_id}
-        db_resp = sb.table("clothes").insert(data_to_insert).execute()
+        # 2. Create a database record with 'PROCESSING' status
+        initial_data = {
+            "user_id": user_id,
+            "image_url": "", # Placeholder, will be updated by worker
+            "status": "PROCESSING",
+            "category": "Analyzing...",
+            "color": "Analyzing..."
+        }
+        
+        db_resp = sb.table("clothes").insert(initial_data).execute()
         clothing_id = db_resp.data[0]['id']
-        
-        text_to_embed = f"{metadata['color']} {metadata['category']} {metadata['season']} {metadata['description']}"
-        vector = get_embedding(text_to_embed)
-        
-        metadata['image_url'] = final_image_url
-        metadata['user_id'] = user_id
-        
-        idx = get_index()
-        idx.upsert(vectors=[{"id": clothing_id, "values": vector, "metadata": metadata}])
-        
-        return {"id": clothing_id, "status": "Saved!", "image_url": final_image_url, "analysis": metadata}
+
+        # 3. Trigger the Celery task (Offload to worker)
+        process_clothing_image.delay(user_id, path, clothing_id)
+
+        # 4. Return immediate response
+        return {
+            "id": clothing_id, 
+            "status": "PROCESSING", 
+            "image_url": "", 
+            "analysis": {"description": "Image is being processed in background..."}
+        }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 2. LIST WARDROBE 
+# (REST OF THE ENDPOINTS - Keep them exactly as they were in your original file)
+# 2. LIST WARDROBE
 @app.get("/wardrobe", response_model=List[ClothingItemDetail])
 async def get_wardrobe(
     category: Optional[str] = Query(None),
@@ -227,7 +220,7 @@ async def get_wardrobe(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 3. DELETE ITEM 
+# 3. DELETE ITEM
 @app.delete("/wardrobe/{item_id}")
 async def delete_item(
     item_id: str,
@@ -255,11 +248,12 @@ async def recommend_outfit(
         query_vector = get_embedding(search_query)
         
         idx = get_index()
+        # Filter for COMPLETED items only to avoid processing errors
         search_results = idx.query(
             vector=query_vector, 
             top_k=15, 
             include_metadata=True,
-            filter={"user_id": user_id}
+            filter={"user_id": user_id, "status": "COMPLETED"} 
         )
         
         wardrobe_context = ""
@@ -306,7 +300,7 @@ async def recommend_outfit(
         print(f"Rec Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# 5. TRAVEL
+# 5. TRAVEL (Keep as is)
 @app.post("/recommend-travel-pack", response_model=TravelResponse)
 async def recommend_travel_pack(
     request: TravelRequest,
@@ -321,7 +315,7 @@ async def recommend_travel_pack(
             vector=query_vector, 
             top_k=30, 
             include_metadata=True,
-            filter={"user_id": user_id}
+            filter={"user_id": user_id, "status": "COMPLETED"}
         )
         
         item_map = {}
@@ -369,7 +363,7 @@ async def recommend_travel_pack(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 6. DAILY TIP (No login - Public)
+# 6. DAILY TIP (Keep as is)
 @app.get("/daily-tip", response_model=DailyTipResponse)
 async def get_daily_tip():
     today = date.today()
@@ -377,7 +371,7 @@ async def get_daily_tip():
     selected_tip = random.choice(STYLING_TIPS)
     return {"date": today.isoformat(), "tip": selected_tip}
 
-# 7. DEFAULT SUGGESTIONS (No login - Public)
+# 7. DEFAULT SUGGESTIONS (Keep as is)
 @app.get("/default-suggestions", response_model=List[DefaultSuggestionItem])
 async def get_default_suggestions():
     return [
