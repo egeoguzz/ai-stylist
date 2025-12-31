@@ -4,7 +4,9 @@ import json
 import httpx
 from celery import Celery
 from rembg import remove, new_session
+
 from PIL import Image
+
 import google.generativeai as genai
 from pinecone import Pinecone
 from supabase import create_client, Client
