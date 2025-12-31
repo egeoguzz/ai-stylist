@@ -220,6 +220,24 @@ async def get_wardrobe(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# 2.1 SINGLE WARDROBE ITEM
+@app.get("/wardrobe/{item_id}", response_model=ClothingItemDetail)
+async def get_clothing_item(
+    item_id: str,
+    user_id: str = Depends(get_current_user)
+):
+    try:
+        sb = get_supabase()
+        response = sb.table("clothes").select("*").eq("id", item_id).eq("user_id", user_id).execute()
+        
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Item not found")
+            
+        return response.data[0]
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # 3. DELETE ITEM
 @app.delete("/wardrobe/{item_id}")
 async def delete_item(
