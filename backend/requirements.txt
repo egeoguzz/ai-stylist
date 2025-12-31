@@ -9,3 +9,6 @@ pillow
 numpy
 rembg[cpu]
 onnxruntime
+celery
+redis
+httpx
