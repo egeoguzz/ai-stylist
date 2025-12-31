@@ -5,7 +5,7 @@ import httpx
 from celery import Celery
 from rembg import remove, new_session
 from PIL import Image
-import google.genai as genai
+import google.generativeai as genai
 from pinecone import Pinecone
 from supabase import create_client, Client
 from dotenv import load_dotenv
@@ -14,7 +14,7 @@ load_dotenv()
 
 # --- CONFIGURATION ---
 # Use the REDIS_URL provided by Railway, or localhost for testing
-redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+redis_url = os.getenv("REDIS_URL")
 
 if redis_url:
     masked_url = redis_url.replace(redis_url.split("@")[0], "redis://*****")
