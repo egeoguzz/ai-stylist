@@ -298,6 +298,7 @@ async def recommend_outfit(
         Act as a stylist. Context: {request.occasion}, {request.weather}
         Wardrobe: {wardrobe_context}
         Task: Pick ONE Top and ONE Bottom (or Dress).
+        IMPORTANT: In 'reasoning' and 'outfit_name', describe items naturally (e.g., "The Blue Shirt"). NEVER include the ID string (UUID) in the text description.
         Return JSON: {{ "outfit_name": "Name", "selected_items": ["ID_1", "ID_2"], "reasoning": "..." }}
         """
         model = get_ai_model()
