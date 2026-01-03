@@ -361,7 +361,8 @@ async def recommend_travel_pack(
         You are a Travel Stylist. Trip: {request.days} days to {request.destination}. Weather: {request.weather}.
         Available Items: {wardrobe_context}
         Task: Create a 'Capsule Wardrobe'.
-        Return JSON: {{ "pack_name": "Name", "items_to_pack": ["ID_1", ...], "outfit_combinations": ["..."], "reasoning": "..." }}
+        IMPORTANT: In 'outfit_combinations', describe items naturally by their color and category (e.g., "Blue Shirt"). NEVER include the ID string (UUID) in the text description.
+        Return JSON: {{ "pack_name": "Name", "items_to_pack": ["ID_1", ...], "outfit_combinations": ["Day 1: ..."], "reasoning": "..." }}
         """
         model = get_ai_model()
         response = model.generate_content(prompt)
