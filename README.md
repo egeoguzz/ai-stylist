@@ -79,18 +79,6 @@ The backend is implemented as a single service with a dedicated worker process t
 
 ---
 
-## Repository Structure
-
-backend/
-├── main.py # FastAPI application
-├── worker.py # Celery worker for background processing
-├── Procfile # Web and worker process definitions
-├── requirements.txt
-└── README.md
-
-
----
-
 ## Collaboration and Ownership
 
 This repository represents ownership of the backend systems, AI pipelines, and production infrastructure.
