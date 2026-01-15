@@ -17,7 +17,7 @@ from pinecone import Pinecone
 from supabase import create_client, Client
 
 # Import the celery task
-from worker import process_clothing_image
+from celery_tasks import process_clothing_image
 
 load_dotenv()
 
