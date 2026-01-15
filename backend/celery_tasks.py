@@ -28,14 +28,14 @@ if not redis_url:
     raise ValueError("FATAL: REDIS_URL environment variable is MISSING. API cannot connect to Queue.")
     
 celery_app = Celery(
-    "worker",
+    "celery_tasks",
     broker=redis_url,
     backend=redis_url
 )
 
 # --- LAZY LOADING GLOBALS FOR WORKER ---
 # These are initialized once when the worker starts
-rembg_session = new_session("u2netp") # Lite Model
+rembg_session = None # Lite Model
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 ai_model = genai.GenerativeModel('gemini-2.5-flash')
@@ -67,6 +67,9 @@ def process_clothing_image(user_id: str, raw_image_path: str, item_id: str):
     5. Update DB and Vector Store
     """
     try:
+        if rembg_session is None:
+            rembg_session = new_session("u2netp")
+            
         print(f"[{item_id}] Processing started...")
 
         # 1. Download raw image from Supabase
