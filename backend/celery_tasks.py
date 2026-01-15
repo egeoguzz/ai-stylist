@@ -17,6 +17,7 @@ load_dotenv()
 # --- CONFIGURATION ---
 # Use the REDIS_URL provided by Railway, or localhost for testing
 redis_url = os.getenv("REDIS_URL")
+rembg_session = None
 
 if redis_url:
     masked_url = redis_url.replace(redis_url.split("@")[0], "redis://*****")
@@ -35,7 +36,6 @@ celery_app = Celery(
 
 # --- LAZY LOADING GLOBALS FOR WORKER ---
 # These are initialized once when the worker starts
-rembg_session = None # Lite Model
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 ai_model = genai.GenerativeModel('gemini-2.5-flash')
@@ -66,8 +66,10 @@ def process_clothing_image(user_id: str, raw_image_path: str, item_id: str):
     4. Generate embeddings
     5. Update DB and Vector Store
     """
+    global rembg_session
     try:
         if rembg_session is None:
+            from rembg import new_session 
             rembg_session = new_session("u2netp")
             
         print(f"[{item_id}] Processing started...")
